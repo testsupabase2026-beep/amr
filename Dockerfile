@@ -1,42 +1,21 @@
 FROM python:3.11-slim
 
-# Set environment variables to optimize Python performance and memory usage
-# MALLOC_ARENA_MAX=2: Reduces glibc memory fragmentation (critical for Python+PyTorch in containers)
-# OMP/MKL_NUM_THREADS=1: Limit CPU threads to reduce memory overhead
-# HF_HOME/TRANSFORMERS_CACHE: Cache HuggingFace models in a known location inside the image
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PORT=8000 \
-    MALLOC_ARENA_MAX=2 \
-    OMP_NUM_THREADS=1 \
-    MKL_NUM_THREADS=1 \
-    HF_HOME=/app/.hf_cache \
-    TRANSFORMERS_CACHE=/app/.hf_cache
+    PORT=8000
 
-# Set the working directory
 WORKDIR /app
 
-# Install system dependencies (build-essential for compiling source packages, libgomp1 for CPU PyTorch & FAISS)
+# System deps needed by some Python packages that compile from source.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the requirements file first to take advantage of Docker layer caching
-COPY requirements.txt /app/
+COPY requirements.txt ./
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Install python dependencies without caching to keep the image slim
-RUN pip install --no-cache-dir -r requirements.txt
+COPY . ./
 
-
-# Copy the rest of the application code
-COPY . /app/
-
-# Pre-collect static files for Whitenoise to serve them efficiently in production
-RUN python manage.py collectstatic --noinput
-
-# Expose port 8000 (Railway will dynamically bind to this or its own PORT environment variable)
 EXPOSE 8000
 
-# Start Django with Gunicorn, automatically running migrations before booting the web server
-CMD ["sh", "-c", "python manage.py migrate && gunicorn recommendation_v1.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --timeout 120 --preload"]
+CMD ["sh", "-c", "uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}"]
